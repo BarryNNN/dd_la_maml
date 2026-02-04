@@ -73,23 +73,22 @@ class Net(nn.Module):
         offset1 = task * self.nc_per_task
         offset2 = (task + 1) * self.nc_per_task
         return int(offset1), int(offset2)
-            
-    def take_multitask_loss(self, bt, logits, y):
-        loss = 0.0
-        for i, ti in enumerate(bt):
-            offset1, offset2 = self.compute_offsets(ti)
-            loss += self.loss(logits[i, offset1:offset2].unsqueeze(0), y[i].unsqueeze(0)-offset1)
-        return loss/len(bt)
+
+    def reshape_input(self, x):
+        """Reshape flattened input to image format for CNN"""
+        if self.args.dataset == 'tinyimagenet':
+            return x.view(-1, 3, 64, 64)
+        elif self.args.dataset == 'cifar100':
+            return x.view(-1, 3, 32, 32)
+        return x
+
+    def take_multitask_loss(self, logits, y):
+        loss = self.loss(logits, y)
+        return loss
 
     def forward(self, x, t):
+        x = self.reshape_input(x)
         output = self.net.forward(x)
-        if self.is_cifar:
-            # make sure we predict classes within the current task
-            offset1, offset2 = self.compute_offsets(t)
-            if offset1 > 0:
-                output[:, :offset1].data.fill_(-10e10)
-            if offset2 < self.n_outputs:
-                output[:, offset2:self.n_outputs].data.fill_(-10e10)
         return output
 
     def getBatch(self, x, y, t):
@@ -170,33 +169,30 @@ class Net(nn.Module):
         for pass_itr in range(self.glances):
 
             self.net.zero_grad()
-            
-            # Draw batch from buffer:
-            bx,by,bt = self.getBatch(x,y,t)
 
-            bx = bx.squeeze()
-            prediction = self.net.forward(bx)
-            loss = self.take_multitask_loss(bt, prediction, by)
+            # Draw batch from buffer:
+            bx, by, _ = self.getBatch(x, y, t)
+            _, offset2 = self.compute_offsets(t)
+
+            bx = self.reshape_input(bx)
+            prediction = self.net.forward(bx)[:, :offset2]
+            loss = self.take_multitask_loss(prediction, by)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.grad_clip_norm)
 
             self.opt_wt.step()
-        
+
         return loss
 
     def inner_update(self, x, fast_weights, y, t):
         """
         Update the fast weights using the current samples and return the updated fast
         """
-
-        if self.is_cifar:
-            offset1, offset2 = self.compute_offsets(t)            
-            logits = self.net.forward(x, fast_weights)[:, :offset2]
-            loss = self.loss(logits[:, offset1:offset2], y-offset1)
-        else:
-            logits = self.net.forward(x, fast_weights)
-            loss = self.loss(logits, y)   
+        x = self.reshape_input(x)
+        _, offset2 = self.compute_offsets(t)
+        logits = self.net.forward(x, fast_weights)[:, :offset2]
+        loss = self.loss(logits, y)
 
         if fast_weights is None:
             fast_weights = self.net.parameters()
@@ -219,8 +215,10 @@ class Net(nn.Module):
         and use it with ER (therefore no meta-learning for the weights)
 
         """
+        _, offset2 = self.compute_offsets(t)
+
         for pass_itr in range(self.glances):
-            
+
             perm = torch.randperm(x.size(0))
             x = x[perm]
             y = y[perm]
@@ -229,21 +227,21 @@ class Net(nn.Module):
             n_batches = self.args.cifar_batches
             rough_sz = math.ceil(batch_sz/n_batches)
             fast_weights = None
-            meta_losses = [0 for _ in range(n_batches)] 
+            meta_losses = [0 for _ in range(n_batches)]
 
-            bx, by, bt = self.getBatch(x.cpu().numpy(), y.cpu().numpy(), t)
-            bx = bx.squeeze()
-            
+            bx, by, _ = self.getBatch(x.cpu().numpy(), y.cpu().numpy(), t)
+            bx = self.reshape_input(bx)
+
             for i in range(n_batches):
 
                 batch_x = x[i*rough_sz : (i+1)*rough_sz]
                 batch_y = y[i*rough_sz : (i+1)*rough_sz]
 
-                # assuming labels for inner update are from the same 
+                # assuming labels for inner update are from the same
                 fast_weights, inner_loss = self.inner_update(batch_x, fast_weights, batch_y, t)
 
-                prediction = self.net.forward(bx, fast_weights)
-                meta_loss = self.take_multitask_loss(bt, prediction, by)
+                prediction = self.net.forward(bx, fast_weights)[:, :offset2]
+                meta_loss = self.take_multitask_loss(prediction, by)
                 meta_losses[i] += meta_loss
 
             # update alphas
@@ -255,7 +253,7 @@ class Net(nn.Module):
 
             torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.grad_clip_norm)
             torch.nn.utils.clip_grad_norm_(self.net.alpha_lr.parameters(), self.args.grad_clip_norm)
-            
+
             # update the LRs (guided by meta-loss, but not the weights)
             self.opt_lr.step()
 
@@ -263,17 +261,17 @@ class Net(nn.Module):
             self.net.zero_grad()
 
             # compute ER loss for network weights
-            prediction = self.net.forward(bx)
-            loss = self.take_multitask_loss(bt, prediction, by)
+            prediction = self.net.forward(bx)[:, :offset2]
+            loss = self.take_multitask_loss(prediction, by)
 
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.net.parameters(), self.args.grad_clip_norm)
 
-            # update weights with grad from simple ER loss 
+            # update weights with grad from simple ER loss
             # and LRs obtained from meta-loss guided by old and new tasks
-            for i,p in enumerate(self.net.parameters()):                                 
-                p.data = p.data - (p.grad * nn.functional.relu(self.net.alpha_lr[i]))       
+            for i,p in enumerate(self.net.parameters()):
+                p.data = p.data - (p.grad * nn.functional.relu(self.net.alpha_lr[i]))
             self.net.zero_grad()
             self.net.alpha_lr.zero_grad()
 

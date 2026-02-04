@@ -19,58 +19,51 @@ class Net(BaseNet):
                                  args)
         self.nc_per_task = n_outputs / n_tasks
 
-    def take_loss(self, t, logits, y):
-        # compute loss on data from a single task
-        offset1, offset2 = self.compute_offsets(t)
-        loss = self.loss(logits[:, offset1:offset2], y-offset1)
-
+    def take_loss(self, logits, y):
+        loss = self.loss(logits, y)
         return loss
 
-    def take_multitask_loss(self, bt, t, logits, y):
-        # compute loss on data from a multiple tasks
-        # separate from take_loss() since the output positions for each task's
-        # logit vector are different and we nly want to compute loss on the relevant positions
-        # since this is a task incremental setting
+    def take_multitask_loss(self, logits, y):
+        loss = self.loss(logits, y)
+        return loss
 
-        loss = 0.0
 
-        for i, ti in enumerate(bt):
-            offset1, offset2 = self.compute_offsets(ti)
-            loss += self.loss(logits[i, offset1:offset2].unsqueeze(0), y[i].unsqueeze(0)-offset1)
-        return loss/len(bt)
-
+    def reshape_input(self, x):
+        """Reshape flattened input to image format for CNN"""
+        if self.args.dataset == 'tinyimagenet':
+            return x.view(-1, 3, 64, 64)
+        elif self.args.dataset == 'cifar100':
+            return x.view(-1, 3, 32, 32)
+        return x
 
     def forward(self, x, t):
+        x = self.reshape_input(x)
         output = self.net.forward(x)
-        # make sure we predict classes within the current task
-        offset1, offset2 = self.compute_offsets(t)
-        if offset1 > 0:
-            output[:, :offset1].data.fill_(-10e10)
-        if offset2 < self.n_outputs:
-            output[:, int(offset2):self.n_outputs].data.fill_(-10e10)
         return output
 
-    def meta_loss(self, x, fast_weights, y, bt, t):
+    def meta_loss(self, x, fast_weights, y, t):
         """
         differentiate the loss through the network updates wrt alpha
+        Class incremental: use all outputs up to current max class
         """
-
-        offset1, offset2 = self.compute_offsets(t)
+        x = self.reshape_input(x)
+        _, offset2 = self.compute_offsets(t)
 
         logits = self.net.forward(x, fast_weights)[:, :offset2]
-        loss_q = self.take_multitask_loss(bt, t, logits, y)
+        loss_q = self.take_multitask_loss(logits, y)
 
         return loss_q, logits
 
     def inner_update(self, x, fast_weights, y, t):
         """
         Update the fast weights using the current samples and return the updated fast
+        Class incremental: use all outputs up to current max class
         """
-
-        offset1, offset2 = self.compute_offsets(t)            
+        x = self.reshape_input(x)
+        _, offset2 = self.compute_offsets(t)
 
         logits = self.net.forward(x, fast_weights)[:, :offset2]
-        loss = self.take_loss(t, logits, y)
+        loss = self.take_loss(logits, y)
 
         if fast_weights is None:
             fast_weights = self.net.parameters()
@@ -109,9 +102,9 @@ class Net(BaseNet):
             fast_weights = None
             meta_losses = [0 for _ in range(n_batches)]
 
-            # get a batch by augmented incming data with old task data, used for 
+            # get a batch by augmented incoming data with old task data, used for
             # computing meta-loss
-            bx, by, bt = self.getBatch(x.cpu().numpy(), y.cpu().numpy(), t)             
+            bx, by, _ = self.getBatch(x.cpu().numpy(), y.cpu().numpy(), t)
 
             for i in range(n_batches):
 
@@ -124,7 +117,7 @@ class Net(BaseNet):
                 # instead of pushing every epoch     
                 if(self.real_epoch == 0):
                     self.push_to_mem(batch_x, batch_y, torch.tensor(t))
-                meta_loss, logits = self.meta_loss(bx, fast_weights, by, bt, t) 
+                meta_loss, logits = self.meta_loss(bx, fast_weights, by, t)
                 
                 meta_losses[i] += meta_loss
 

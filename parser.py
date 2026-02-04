@@ -11,7 +11,7 @@ def get_parser():
     parser.add_argument('--model', type=str, default='single',
                         help='algo to train')
     parser.add_argument('--arch', type=str, default='linear', 
-                        help='arch to use for training', choices = ['linear', 'pc_cnn'])
+                        help='arch to use for training', choices = ['linear', 'pc_cnn', 'convnetd3'])
     parser.add_argument('--n_hiddens', type=int, default=100,
                         help='number of hidden neurons at each layer')
     parser.add_argument('--n_layers', type=int, default=2,

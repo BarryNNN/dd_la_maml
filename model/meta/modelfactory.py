@@ -54,7 +54,7 @@ class ModelFactory():
                 return [
                     ('conv2d', [channels, 3, 3, 3, 2, 1], ''),
                     ('relu', [True], ''),
-                    
+
                     ('conv2d', [channels, channels, 3, 3, 2, 1], ''),
                     ('relu', [True], ''),
 
@@ -71,6 +71,95 @@ class ModelFactory():
                     ('relu', [True], ''),
                     ('linear', [sizes[-1], 320], '')
                 ]
+
+            # ConvNetD3: depth=3, width=128, relu, instancenorm (using bn), avgpooling
+            # Input: 32x32 -> after 3 avgpool(2,2): 4x4
+            # Final feature: 128 * 4 * 4 = 2048
+            elif model_type == 'convnetd3':
+                channels = 128  # net_width
+                return [
+                    # Block 1: conv -> bn -> relu -> avgpool
+                    ('conv2d', [channels, 3, 3, 3, 1, 1], ''),  # 32x32 -> 32x32
+                    ('bn', [channels], ''),
+                    ('relu', [True], ''),
+                    ('avg_pool2d', [2, 2, 0], ''),  # 32x32 -> 16x16
+
+                    # Block 2: conv -> bn -> relu -> avgpool
+                    ('conv2d', [channels, channels, 3, 3, 1, 1], ''),  # 16x16 -> 16x16
+                    ('bn', [channels], ''),
+                    ('relu', [True], ''),
+                    ('avg_pool2d', [2, 2, 0], ''),  # 16x16 -> 8x8
+
+                    # Block 3: conv -> bn -> relu -> avgpool
+                    ('conv2d', [channels, channels, 3, 3, 1, 1], ''),  # 8x8 -> 8x8
+                    ('bn', [channels], ''),
+                    ('relu', [True], ''),
+                    ('avg_pool2d', [2, 2, 0], ''),  # 8x8 -> 4x4
+
+                    ('flatten', [], ''),
+                    ('rep', [], ''),
+
+                    # classifier: 128 * 4 * 4 = 2048 -> num_classes
+                    ('linear', [sizes[-1], 2048], '')
+                ]
+
+        elif dataset == "cifar10":
+
+
+            if model_type == 'pc_cnn':
+                channels = 160
+                return [
+                    ('conv2d', [channels, 3, 3, 3, 2, 1], ''),
+                    ('relu', [True], ''),
+
+                    ('conv2d', [channels, channels, 3, 3, 2, 1], ''),
+                    ('relu', [True], ''),
+
+                    ('conv2d', [channels, channels, 3, 3, 2, 1], ''),
+                    ('relu', [True], ''),
+
+                    ('flatten', [], ''),
+                    ('rep', [], ''),
+
+                    ('linear', [320, 16 * channels], ''),
+                    ('relu', [True], ''),
+
+                    ('linear', [320, 320], ''),
+                    ('relu', [True], ''),
+                    ('linear', [sizes[-1], 320], '')
+                ]
+
+            # ConvNetD3: depth=3, width=128, relu, instancenorm (using bn), avgpooling
+            # Input: 32x32 -> after 3 avgpool(2,2): 4x4
+            # Final feature: 128 * 4 * 4 = 2048
+            elif model_type == 'convnetd3':
+                channels = 128  # net_width
+                return [
+                    # Block 1: conv -> bn -> relu -> avgpool
+                    ('conv2d', [channels, 3, 3, 3, 1, 1], ''),  # 32x32 -> 32x32
+                    ('bn', [channels], ''),
+                    ('relu', [True], ''),
+                    ('avg_pool2d', [2, 2, 0], ''),  # 32x32 -> 16x16
+
+                    # Block 2: conv -> bn -> relu -> avgpool
+                    ('conv2d', [channels, channels, 3, 3, 1, 1], ''),  # 16x16 -> 16x16
+                    ('bn', [channels], ''),
+                    ('relu', [True], ''),
+                    ('avg_pool2d', [2, 2, 0], ''),  # 16x16 -> 8x8
+
+                    # Block 3: conv -> bn -> relu -> avgpool
+                    ('conv2d', [channels, channels, 3, 3, 1, 1], ''),  # 8x8 -> 8x8
+                    ('bn', [channels], ''),
+                    ('relu', [True], ''),
+                    ('avg_pool2d', [2, 2, 0], ''),  # 8x8 -> 4x4
+
+                    ('flatten', [], ''),
+                    ('rep', [], ''),
+
+                    # classifier: 128 * 4 * 4 = 2048 -> num_classes
+                    ('linear', [sizes[-1], 2048], '')
+                ]
+
 
         else:
             print("Unsupported model; either implement the model in model/ModelFactory or choose a different model")
