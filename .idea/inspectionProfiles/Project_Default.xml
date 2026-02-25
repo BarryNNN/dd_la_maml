@@ -1,0 +1,126 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="appnope" />
+          <option value="asttokens" />
+          <option value="attrs" />
+          <option value="beautifulsoup4" />
+          <option value="bleach" />
+          <option value="comm" />
+          <option value="contourpy" />
+          <option value="cycler" />
+          <option value="debugpy" />
+          <option value="decorator" />
+          <option value="defusedxml" />
+          <option value="dnspython" />
+          <option value="email_validator" />
+          <option value="executing" />
+          <option value="fastapi-cli" />
+          <option value="fastapi-cloud-cli" />
+          <option value="fastjsonschema" />
+          <option value="fonttools" />
+          <option value="httptools" />
+          <option value="ipykernel" />
+          <option value="ipython" />
+          <option value="ipython_pygments_lexers" />
+          <option value="jedi" />
+          <option value="Jinja2" />
+          <option value="jsonschema" />
+          <option value="jsonschema-specifications" />
+          <option value="jupyter_client" />
+          <option value="jupyter_core" />
+          <option value="jupyterlab_pygments" />
+          <option value="kiwisolver" />
+          <option value="markdown-it-py" />
+          <option value="MarkupSafe" />
+          <option value="matplotlib" />
+          <option value="matplotlib-inline" />
+          <option value="mdurl" />
+          <option value="mistune" />
+          <option value="nbclient" />
+          <option value="nbconvert" />
+          <option value="nbformat" />
+          <option value="nest-asyncio" />
+          <option value="numpy" />
+          <option value="packaging" />
+          <option value="pandas" />
+          <option value="pandocfilters" />
+          <option value="parso" />
+          <option value="pexpect" />
+          <option value="pillow" />
+          <option value="platformdirs" />
+          <option value="prompt_toolkit" />
+          <option value="psutil" />
+          <option value="ptyprocess" />
+          <option value="pure_eval" />
+          <option value="Pygments" />
+          <option value="pyparsing" />
+          <option value="python-dateutil" />
+          <option value="python-dotenv" />
+          <option value="pytz" />
+          <option value="PyYAML" />
+          <option value="pyzmq" />
+          <option value="referencing" />
+          <option value="rich" />
+          <option value="rich-toolkit" />
+          <option value="rignore" />
+          <option value="rpds-py" />
+          <option value="sentry-sdk" />
+          <option value="shellingham" />
+          <option value="six" />
+          <option value="soupsieve" />
+          <option value="stack-data" />
+          <option value="tinycss2" />
+          <option value="tornado" />
+          <option value="traitlets" />
+          <option value="typer" />
+          <option value="tzdata" />
+          <option value="uvloop" />
+          <option value="watchfiles" />
+          <option value="wcwidth" />
+          <option value="webencodings" />
+          <option value="websockets" />
+          <option value="fastapi" />
+          <option value="fastapi-jwt-auth" />
+          <option value="uvicorn" />
+          <option value="pydantic" />
+          <option value="pydantic-core" />
+          <option value="bcrypt" />
+          <option value="pyjwt" />
+          <option value="resend" />
+          <option value="sqlalchemy" />
+          <option value="psycopg2-binary" />
+          <option value="dashscope" />
+          <option value="requests" />
+          <option value="openai" />
+          <option value="langchain" />
+          <option value="langchain-community" />
+          <option value="langchain-core" />
+          <option value="langsmith" />
+          <option value="langchain-google-genai" />
+          <option value="langchain-experimental" />
+          <option value="langchain_openai" />
+          <option value="langchain-text-splitters" />
+          <option value="azure-core" />
+          <option value="azure-common" />
+          <option value="azure-ai-formrecognizer" />
+          <option value="azure-ai-documentintelligence" />
+          <option value="aiofiles" />
+          <option value="aiohttp" />
+          <option value="PyVimeo" />
+          <option value="dotenv" />
+        </list>
+      </option>
+    </inspection_tool>
+    <inspection_tool class="PyUnresolvedReferencesInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredIdentifiers">
+        <list>
+          <option value="tuple.*" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>

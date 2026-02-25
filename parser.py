@@ -100,8 +100,19 @@ def get_parser():
     parser.add_argument('--second_order', default=False , action='store_true',
                         help='use second order MAML updates')
 
+    # Dataset Distillation parameters
+    parser.add_argument('--ipc', type=int, default=50, help='images per class for distillation')
+    parser.add_argument('--distill_iterations', type=int, default=5000, help='number of distillation iterations')
+    parser.add_argument('--distill_lr_img', type=float, default=1000, help='learning rate for synthetic images')
+    parser.add_argument('--distill_lr_lr', type=float, default=0.00001, help='learning rate for learning rate')
+    parser.add_argument('--distill_lr_teacher', type=float, default=0.01, help='teacher network learning rate')
+    parser.add_argument('--distill_expert_epochs', type=int, default=2, help='expert trajectory epochs')
+    parser.add_argument('--distill_syn_steps', type=int, default=30, help='synthetic data training steps per iteration')
+    parser.add_argument('--distill_max_start_epoch', type=int, default=20, help='max start epoch for expert trajectory')
+    parser.add_argument('--distill_pix_init', type=str, default='real', choices=['real', 'noise'], help='pixel initialization method')
+    parser.add_argument('--dsa_strategy', type=str, default='color_crop_cutout_flip_scale_rotate', help='DSA augmentation strategy')
 
-   # memory parameters for GEM | AGEM | ICARL 
+   # memory parameters for GEM | AGEM | ICARL
     parser.add_argument('--n_memories', type=int, default=0,
                         help='number of memories per task')
     parser.add_argument('--memory_strength', default=0, type=float,
