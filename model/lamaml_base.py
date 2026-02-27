@@ -42,7 +42,7 @@ class BaseNet(torch.nn.Module):
 
         # setup losses
         self.loss = torch.nn.CrossEntropyLoss()
-        self.is_cifar = ((args.dataset == 'cifar100') or (args.dataset == 'tinyimagenet'))
+        self.is_cifar = ((args.dataset == 'cifar100') or (args.dataset == 'tinyimagenet') or (args.dataset == 'cifar10'))
         self.glances = args.glances
         self.pass_itr = 0
         self.real_epoch = 0

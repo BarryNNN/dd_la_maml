@@ -6,6 +6,11 @@ from torchvision import datasets, transforms
 import os
 from dataloaders import cifar_info
 
+# Patch CIFAR download URLs to use reliable Hugging Face mirrors
+# (the original cs.toronto.edu URLs are often unreliable)
+datasets.cifar.CIFAR10.url = "https://huggingface.co/datasets/jxie/cifar10/resolve/main/cifar-10-python.tar.gz"
+datasets.cifar.CIFAR100.url = "https://huggingface.co/datasets/jxie/cifar100/resolve/main/cifar-100-python.tar.gz"
+
 class DummyDataset(torch.utils.data.Dataset):
 
     def __init__(self, x, y, trsf, pretrsf = None, imgnet_like = False, super_y = None):

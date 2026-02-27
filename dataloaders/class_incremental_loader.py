@@ -193,8 +193,16 @@ class IncrementalLoader:
 
             else:
                 root_path =  self._opt.data_path
-                train_dataset = dataset.base_dataset(root_path, train=True, download=True)
-                test_dataset = dataset.base_dataset(root_path, train=False, download=True)
+                try:
+                    train_dataset = dataset.base_dataset(root_path, train=True, download=True)
+                except RuntimeError:
+                    # Fallback: try without download (assume data is pre-downloaded)
+                    print("Auto-download failed. Trying to load from local data...")
+                    train_dataset = dataset.base_dataset(root_path, train=True, download=False)
+                try:
+                    test_dataset = dataset.base_dataset(root_path, train=False, download=True)
+                except RuntimeError:
+                    test_dataset = dataset.base_dataset(root_path, train=False, download=False)
 
                 x_train, y_train = train_dataset.data, np.array(train_dataset.targets)
                 x_val, y_val, x_train, y_train = self._split_per_class(
