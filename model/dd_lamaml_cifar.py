@@ -24,8 +24,9 @@ class Net(BaseNet):
         self.nc_per_task = n_outputs / n_tasks
         self.n_tasks = n_tasks
 
-        # 蒸馏buffer，大小与原始buffer一致
-        self.M_distill = []
+        # 存储所有任务的蒸馏数据，用于 Phase 2 后训练
+        # 格式: {task_id: {'images': Tensor, 'labels': Tensor}}
+        self.all_distilled_data = {}
 
         # 用于存储每个任务的trajectories和初始化参数（用于轨迹偏移更新）
         # 格式: {task_id: {'trajectories': [...], 'init_params': [...], 'class_map': {...}, 'class_map_inv': {...}}}
@@ -45,7 +46,6 @@ class Net(BaseNet):
             self.im_size = (32, 32)
             self.channel = 3
 
-        # 从args获取蒸馏超参数
         self.ipc = getattr(args, 'ipc', 50)
         self.distill_iterations = getattr(args, 'distill_iterations', 1000)
         self.distill_lr_img = getattr(args, 'distill_lr_img', 1000)
@@ -75,22 +75,29 @@ class Net(BaseNet):
             pix_init=self.distill_pix_init
         )
 
-    def take_loss(self, logits, y):
+    def take_loss(self, t, logits, y):
         # compute loss on data from a single task
-        # offset1, offset2 = self.compute_offsets(t)
-        # loss = self.loss(logits[:, offset1:offset2], y - offset1)
-        loss = self.loss(logits, y)
+        offset1, offset2 = self.compute_offsets(t)
+        loss = self.loss(logits[:, offset1:offset2], y - offset1)
         return loss
 
-    def take_multitask_loss(self, logits, y):
-        # loss = 0.0
-        #
-        # for i, ti in enumerate(bt):
-        #     offset1, offset2 = self.compute_offsets(ti)
-        #     loss += self.loss(logits[i, offset1:offset2].unsqueeze(0), y[i].unsqueeze(0) - offset1)
-        # return loss / len(bt)
-        loss = self.loss(logits, y)
-        return loss
+    def take_multitask_loss(self, bt, logits, y, task_id, current_batch_size):
+        # compute loss on data from multiple tasks
+        # class incremental setting: different loss computation for current task data and replay buffer data
+        # Note: getBatch returns [memory_buffer_data, current_task_data]
+        # so current task data starts at index (len(bt) - current_batch_size)
+        loss = 0.0
+        n_total = len(bt)
+        n_buffer = n_total - current_batch_size  # number of samples from memory buffer
+
+        for i, ti in enumerate(bt):
+            if i < n_buffer:  # replay buffer data (comes first from getBatch)
+                _, offset2 = self.compute_offsets(task_id)
+                loss += 0.5 * self.loss(logits[i, 0:offset2].unsqueeze(0), y[i].unsqueeze(0))
+            else:  # current task data
+                offset1, offset2 = self.compute_offsets(ti)
+                loss += self.loss(logits[i, offset1:].unsqueeze(0), y[i].unsqueeze(0) - offset1)
+        return loss / n_total
 
     def reshape_input(self, x):
         """Reshape flattened input to image format for CNN"""
@@ -105,16 +112,15 @@ class Net(BaseNet):
         output = self.net.forward(x)
         return output
 
-    def meta_loss(self, x, fast_weights, y, t):
+    def meta_loss(self, x, fast_weights, y, bt, t, batch_size=32):
         """
         differentiate the loss through the network updates wrt alpha
-        Class incremental: use all outputs up to current max class
+        class incremental setting
         """
         x = self.reshape_input(x)
-        _, offset2 = self.compute_offsets(t)
 
-        logits = self.net.forward(x, fast_weights)[:, :offset2]
-        loss_q = self.take_multitask_loss(logits, y)
+        logits = self.net.forward(x, fast_weights)
+        loss_q = self.take_multitask_loss(bt, logits, y, t, batch_size)
 
         return loss_q, logits
 
@@ -124,10 +130,9 @@ class Net(BaseNet):
         Class incremental: use all outputs up to current max class
         """
         x = self.reshape_input(x)
-        _, offset2 = self.compute_offsets(t)
 
-        logits = self.net.forward(x, fast_weights)[:, :offset2]
-        loss = self.take_loss(logits, y)
+        logits = self.net.forward(x, fast_weights)
+        loss = self.take_loss(t, logits, y)
 
         if fast_weights is None:
             fast_weights = self.net.parameters()
@@ -177,7 +182,7 @@ class Net(BaseNet):
 
             # get a batch by augmented incoming data with old task data, used for
             # computing meta-loss
-            bx, by, _ = self.getBatch(x.cpu().numpy(), y.cpu().numpy(), t)
+            bx, by, bt = self.getBatch(x.cpu().numpy(), y.cpu().numpy(), t)
 
             for i in range(n_batches):
 
@@ -190,7 +195,7 @@ class Net(BaseNet):
                 # instead of pushing every epoch
                 if (self.real_epoch == 0):
                     self.push_to_mem(batch_x, batch_y, torch.tensor(t))
-                meta_loss, logits = self.meta_loss(bx, fast_weights, by, t)
+                meta_loss, logits = self.meta_loss(bx, fast_weights, by, bt, t, batch_size=batch_sz)
 
                 meta_losses[i] += meta_loss
 
@@ -218,86 +223,10 @@ class Net(BaseNet):
 
         return meta_loss.item()
 
-    def getBatch(self, x, y, t, batch_size=None):
-        """
-        重写父类的getBatch方法
-        组合当前任务数据 + 蒸馏buffer中的历史数据
-        用于计算meta-loss
-        """
-        if x is not None:
-            mxi = np.array(x)
-            myi = np.array(y)
-            mti = np.ones(x.shape[0], dtype=int) * t
-        else:
-            mxi = np.empty(shape=(0, 0))
-            myi = np.empty(shape=(0, 0))
-            mti = np.empty(shape=(0, 0))
-
-        bxs = []
-        bys = []
-        bts = []
-
-        batch_size = self.batchSize if batch_size is None else batch_size
-
-        # 1. 从蒸馏buffer采样历史任务知识（如果存在且不是第一个任务）
-        if len(self.M_distill) > 0 and t > 0:
-            distill_size = min(batch_size // 2, len(self.M_distill))
-            order = list(range(len(self.M_distill)))
-            shuffle(order)
-            for j in range(distill_size):
-                k = order[j]
-                x_d, y_d, t_d = self.M_distill[k]
-                # 蒸馏数据已经是图像格式 [C, H, W]，需要展平
-                xi = x_d.cpu().numpy().flatten()
-                yi = y_d.cpu().numpy() if isinstance(y_d, torch.Tensor) else np.array(y_d)
-                ti = t_d.cpu().numpy() if isinstance(t_d, torch.Tensor) else np.array(t_d)
-                bxs.append(xi)
-                bys.append(yi)
-                bts.append(ti)
-
-        # 2. 从当前任务buffer (M_new) 采样
-        if self.args.use_old_task_memory and t > 0:
-            MEM = self.M
-        else:
-            MEM = self.M_new
-
-        if len(MEM) > 0:
-            # 如果已经从蒸馏buffer采样了，则减少从M_new采样的数量
-            current_batch_size = batch_size // 2 if (len(self.M_distill) > 0 and t > 0) else batch_size
-            osize = min(current_batch_size, len(MEM))
-            order = list(range(len(MEM)))
-            shuffle(order)
-            for j in range(osize):
-                k = order[j]
-                x_m, y_m, t_m = MEM[k]
-                xi = np.array(x_m)
-                yi = np.array(y_m)
-                ti = np.array(t_m)
-                bxs.append(xi)
-                bys.append(yi)
-                bts.append(ti)
-
-        # 3. 添加当前batch的新数据
-        for j in range(len(myi)):
-            bxs.append(mxi[j])
-            bys.append(myi[j])
-            bts.append(mti[j])
-
-        bxs = Variable(torch.from_numpy(np.array(bxs))).float()
-        bys = Variable(torch.from_numpy(np.array(bys))).long().view(-1)
-        bts = Variable(torch.from_numpy(np.array(bts))).long().view(-1)
-
-        # handle gpus if specified
-        if self.cuda:
-            bxs = bxs.cuda()
-            bys = bys.cuda()
-            bts = bts.cuda()
-
-        return bxs, bys, bts
-
     def end_task(self, task_id):
         """
         任务结束后进行数据蒸馏，并使用轨迹偏移更新旧任务的蒸馏数据
+        蒸馏数据仅存储，不参与 Phase 1 训练，留给 Phase 2 使用
 
         流程:
         1. 获取当前meta-update后的参数
@@ -335,7 +264,6 @@ class Net(BaseNet):
         # 5. 蒸馏当前任务的数据
         print(f"\n--- Starting distillation for task {task_id} with IPC={self.ipc} ---")
         try:
-            # 使用distill_with_trajectory_return来获取trajectories
             distilled_data = self.distiller.distill_with_trajectory_return(
                 task_images,
                 task_labels,
@@ -361,16 +289,14 @@ class Net(BaseNet):
                 'class_map_inv': class_map_inv
             }
 
-            # 7. 将蒸馏数据添加到M_distill
-            for i in range(len(distilled_images)):
-                distill_sample = [
-                    distilled_images[i].cpu(),
-                    distilled_labels[i].cpu(),
-                    torch.tensor(task_id)
-                ]
-                self._add_to_distill_buffer(distill_sample)
+            # 7. 将蒸馏数据存储到 all_distilled_data（用于 Phase 2）
+            self.all_distilled_data[task_id] = {
+                'images': distilled_images.cpu(),
+                'labels': distilled_labels.cpu()
+            }
 
-            print(f"M_distill now has {len(self.M_distill)} samples")
+            total_distilled = sum(len(d['images']) for d in self.all_distilled_data.values())
+            print(f"Total distilled samples across all tasks: {total_distilled}")
 
         except Exception as e:
             print(f"Distillation failed with error: {e}")
@@ -379,11 +305,6 @@ class Net(BaseNet):
 
         # 8. 清空current_task_data，准备下一个任务
         self.current_task_data = {'images': [], 'labels': []}
-
-        # 保留M_new的数据到M中，然后清空M_new
-        self.M = self.M_new.copy()
-        self.M_new = []
-        self.age = 0
 
         print(f"===== Distillation for task {task_id} complete =====\n")
 
@@ -394,35 +315,16 @@ class Net(BaseNet):
         Args:
             new_init_params: 当前meta-update后的参数
         """
-        # 按任务ID收集M_distill中的数据
-        task_distill_data = {}
-        task_distill_indices = {}
-
-        for idx, sample in enumerate(self.M_distill):
-            img, label, t_id = sample
-            t_id_val = t_id.item() if isinstance(t_id, torch.Tensor) else t_id
-
-            if t_id_val not in task_distill_data:
-                task_distill_data[t_id_val] = {'images': [], 'labels': []}
-                task_distill_indices[t_id_val] = []
-
-            task_distill_data[t_id_val]['images'].append(img)
-            task_distill_data[t_id_val]['labels'].append(label)
-            task_distill_indices[t_id_val].append(idx)
-
-        # 对每个旧任务进行轨迹偏移更新
         for old_task_id, traj_info in self.task_trajectories.items():
-            if old_task_id not in task_distill_data:
-                print(f"Task {old_task_id} has no distilled data in M_distill, skipping")
+            if old_task_id not in self.all_distilled_data:
+                print(f"Task {old_task_id} has no distilled data, skipping")
                 continue
 
             print(f"Updating task {old_task_id} with trajectory shift...")
 
-            # 获取旧任务的蒸馏数据
-            old_images = torch.stack(task_distill_data[old_task_id]['images'])
-            old_labels = torch.stack(task_distill_data[old_task_id]['labels'])
+            old_images = self.all_distilled_data[old_task_id]['images']
+            old_labels = self.all_distilled_data[old_task_id]['labels']
 
-            # 调用轨迹偏移更新方法
             updated_data = self.distiller.update_distilled_data_with_trajectory_shift(
                 old_images=old_images,
                 old_labels=old_labels,
@@ -436,18 +338,11 @@ class Net(BaseNet):
                 verbose=True
             )
 
-            # 更新M_distill中对应的数据
-            updated_images = updated_data['images']
-            updated_labels = updated_data['labels']
-
-            indices = task_distill_indices[old_task_id]
-            for i, idx in enumerate(indices):
-                if i < len(updated_images):
-                    self.M_distill[idx] = [
-                        updated_images[i].cpu(),
-                        updated_labels[i].cpu(),
-                        torch.tensor(old_task_id)
-                    ]
+            # 更新 all_distilled_data 中对应任务的数据
+            self.all_distilled_data[old_task_id] = {
+                'images': updated_data['images'].cpu(),
+                'labels': updated_data['labels'].cpu()
+            }
 
             # 更新task_trajectories中的init_params为新的参数
             self.task_trajectories[old_task_id]['init_params'] = [
@@ -456,18 +351,111 @@ class Net(BaseNet):
 
             print(f"Task {old_task_id} updated successfully")
 
-    def _add_to_distill_buffer(self, distill_sample):
+
+    def train_on_distilled_data(self, args, val_tasks=None, test_tasks=None, evaluator=None):
         """
-        将蒸馏样本添加到M_distill
-        使用reservoir sampling来管理固定大小的buffer
+        Phase 2: 使用全部蒸馏数据在 θ_T（Phase 1 最终参数）上继续训练
+
+        对应 Algorithm 1 的第 23-29 行:
+        - 收集所有任务的蒸馏数据 DD_R = ∪ D_syn^t
+        - 用 θ_T 初始化（即当前 self.net 的参数，Phase 1 最后一次 meta-update 的结果）
+        - 用蒸馏数据训练模型
+
+        Args:
+            args: 训练参数
+            val_tasks: 验证任务（用于训练过程中评估）
+            test_tasks: 测试任务
+            evaluator: 评估函数
         """
-        if len(self.M_distill) < self.memories:
-            # 还有空间，直接添加
-            self.M_distill.append(distill_sample)
-        else:
-            # Buffer已满，使用reservoir sampling替换
-            # 计算替换概率
-            idx = random.randint(0, len(self.M_distill))
-            if idx < self.memories:
-                self.M_distill[idx] = distill_sample
+        if len(self.all_distilled_data) == 0:
+            print("No distilled data available for Phase 2 training")
+            return
+
+        print("\n" + "=" * 60)
+        print("Phase 2: Training on distilled data")
+        print("=" * 60)
+
+        # 1. 收集所有任务的蒸馏数据 DD_R = ∪ D_syn^t
+        all_images = []
+        all_labels = []
+        for task_id in sorted(self.all_distilled_data.keys()):
+            data = self.all_distilled_data[task_id]
+            all_images.append(data['images'])
+            all_labels.append(data['labels'])
+            print(f"Task {task_id}: {len(data['images'])} distilled samples")
+
+        all_images = torch.cat(all_images, dim=0)
+        all_labels = torch.cat(all_labels, dim=0)
+        print(f"Total distilled data: {len(all_images)} samples")
+
+        # 2. θ_dd ← θ_T（当前网络参数即为 Phase 1 最终的 meta-updated 参数）
+        # 不需要额外操作，self.net 已经包含 θ_T
+        print("Using Phase 1 final parameters (θ_T) as initialization")
+
+        # 3. 创建 DataLoader
+        if self.cuda:
+            all_images = all_images.cuda()
+            all_labels = all_labels.cuda()
+
+        dataset = torch.utils.data.TensorDataset(all_images, all_labels)
+        dd_batch_size = getattr(args, 'dd_batch_size', min(64, len(all_images)))
+        dataloader = torch.utils.data.DataLoader(
+            dataset, batch_size=dd_batch_size, shuffle=True, num_workers=0
+        )
+
+        # 4. 设置 Phase 2 训练超参数
+        num_dd_epochs = getattr(args, 'num_dd_epochs', 100)
+        dd_lr = getattr(args, 'dd_lr', 0.01)
+        dd_weight_decay = getattr(args, 'dd_weight_decay', 1e-4)
+
+        optimizer = torch.optim.SGD(
+            self.net.parameters(), lr=dd_lr,
+            momentum=0.9, weight_decay=dd_weight_decay
+        )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=num_dd_epochs
+        )
+        criterion = nn.CrossEntropyLoss()
+
+        # 5. 训练循环
+        self.net.train()
+        for ep in range(num_dd_epochs):
+            epoch_loss = 0.0
+            n_batches = 0
+
+            for batch_images, batch_labels in dataloader:
+                optimizer.zero_grad()
+
+                # 蒸馏数据已经是 [C, H, W] 格式，直接前向传播
+                logits = self.net.forward(batch_images)
+                loss = criterion(logits, batch_labels)
+
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.net.parameters(), args.grad_clip_norm)
+                optimizer.step()
+
+                epoch_loss += loss.item()
+                n_batches += 1
+
+            scheduler.step()
+            avg_loss = epoch_loss / max(n_batches, 1)
+
+            # 定期评估
+            if evaluator is not None and val_tasks is not None and (ep + 1) % 10 == 0:
+                val_acc = evaluator(self, val_tasks, args)
+                avg_val = sum(val_acc).item() / len(val_acc)
+                print(f"Phase 2 Epoch {ep+1}/{num_dd_epochs} | Loss: {avg_loss:.4f} | Val Acc: {avg_val:.4f}")
+            elif (ep + 1) % 10 == 0:
+                print(f"Phase 2 Epoch {ep+1}/{num_dd_epochs} | Loss: {avg_loss:.4f}")
+
+        # 6. 最终评估
+        print("\n--- Phase 2 Training Complete ---")
+        if evaluator is not None:
+            if val_tasks is not None:
+                val_acc = evaluator(self, val_tasks, args)
+                print(f"Phase 2 Final Val Accuracy: Total={sum(val_acc).item()/len(val_acc):.4f} | Per-task={val_acc}")
+            if test_tasks is not None:
+                test_acc = evaluator(self, test_tasks, args)
+                print(f"Phase 2 Final Test Accuracy: Total={sum(test_acc).item()/len(test_acc):.4f} | Per-task={test_acc}")
+        print("=" * 60)
 

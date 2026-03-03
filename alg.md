@@ -5,12 +5,13 @@ $$
 \hline
 \textbf{Input: } \text{Network weights } \theta, \text{ LRs } \alpha, \text{ inner objective } \ell, \text{ meta objective } \mathcal{L}, \text{ learning rate for } \alpha: \eta \\
 \hline
-1: \quad j \leftarrow 0, \; \mathcal{R} \leftarrow \{\}, \; \text{DD}_\mathcal{R} \leftarrow \{\} \quad \triangleright \text{ Initialise Replay Buffer and Distilled Data Buffer} \\
+\textbf{// Phase 1: Continual Learning with La-MAML} \\
+1: \quad j \leftarrow 0, \; \mathcal{R} \leftarrow \{\} \quad \triangleright \text{ Initialise Replay Buffer} \\
 2: \quad \textbf{for } t := 1 \textbf{ to } T \textbf{ do} \\
 3: \quad \quad \textbf{for } ep := 1 \textbf{ to } \text{num\_epochs} \textbf{ do} \\
 4: \quad \quad \quad \textbf{for } \text{batch } b \textbf{ in } (X^t, Y^t) \sim \mathcal{D}_t \textbf{ do} \\
 5: \quad \quad \quad \quad k \leftarrow \text{sizeof}(b) \\
-6: \quad \quad \quad \quad b_m \leftarrow \text{Sample}(\text{DD}_\mathcal{R}) \cup b \\
+6: \quad \quad \quad \quad b_m \leftarrow \text{Sample}(\mathcal{R}) \cup b \quad \triangleright \text{ Use replay buffer only (no distilled data)} \\
 7: \quad \quad \quad \quad \textbf{for } n = 0 \textbf{ to } k - 1 \textbf{ do} \\
 8: \quad \quad \quad \quad \quad \text{Push } b[k'] \text{ to } \mathcal{R} \text{ with reservoir sampling} \\
 9: \quad \quad \quad \quad \quad \theta^j_{k'+1} \leftarrow \theta^j_{k'} - \alpha^j \cdot \nabla_{\theta^j_{k'}} \ell \\
@@ -27,6 +28,17 @@ $$
 20: \quad \quad \text{Using } \textbf{Algorithm 2} \text{ to update old tasks with trajectory shift} \\
 21: \quad \quad \text{Using } \textbf{Algorithm 3} \text{ to distill current task data} \\
 22: \quad \textbf{end for} \\
+\\
+\textbf{// Phase 2: Post-Training with Distilled Data} \\
+23: \quad \text{DD}_\mathcal{R} \leftarrow \bigcup_{t=1}^{T} \mathcal{D}_{syn}^{t} \quad \triangleright \text{ Collect all distilled data from all tasks} \\
+24: \quad \theta_{dd} \leftarrow \theta_T \quad \triangleright \text{ Initialize with the final meta-updated parameters from Phase 1} \\
+25: \quad \textbf{for } ep := 1 \textbf{ to } \text{num\_dd\_epochs} \textbf{ do} \\
+26: \quad \quad \textbf{for } \text{batch } b_{dd} \textbf{ in } \text{DD}_\mathcal{R} \textbf{ do} \\
+27: \quad \quad \quad \theta_{dd} \leftarrow \theta_{dd} - \alpha_{dd} \cdot \nabla_{\theta_{dd}} \ell(b_{dd}; \theta_{dd}) \\
+28: \quad \quad \textbf{end for} \\
+29: \quad \textbf{end for} \\
+\hline
+\textbf{Output: } \text{Distilled model } \theta_{dd} \\
 \hline
 \end{array}
 $$

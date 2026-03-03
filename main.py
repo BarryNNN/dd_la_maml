@@ -117,13 +117,19 @@ def life_experience(model, inc_loader, args):
         if hasattr(model, 'end_task'):
             model.end_task(task_info["task"])
 
-    print("####Final Validation Accuracy####")
     print("Final Results:- \n Total Accuracy: {} \n Individual Accuracy: {}".format(sum(result_val_a[-1])/len(result_val_a[-1]), result_val_a[-1]))
 
     if args.calc_test_accuracy:
-        print("####Final Test Accuracy####")
         print("Final Results:- \n Total Accuracy: {} \n Individual Accuracy: {}".format(sum(result_test_a[-1])/len(result_test_a[-1]), result_test_a[-1]))
 
+    # Phase 2: 使用蒸馏数据后训练
+    if args.model == "dd_lamaml_cifar":
+        model.train_on_distilled_data(
+            args,
+            val_tasks=val_tasks,
+            test_tasks=test_tasks if args.calc_test_accuracy else None,
+            evaluator=evaluator
+        )
 
     time_end = time.time()
     time_spent = time_end - time_start

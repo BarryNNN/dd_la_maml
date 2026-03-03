@@ -6,11 +6,11 @@ def get_parser():
     parser = argparse.ArgumentParser(description='Continual learning')
     parser.add_argument('--expt_name', type=str, default='test_lamaml',
                     help='name of the experiment')
-    
+
     # model details
     parser.add_argument('--model', type=str, default='single',
                         help='algo to train')
-    parser.add_argument('--arch', type=str, default='linear', 
+    parser.add_argument('--arch', type=str, default='linear',
                         help='arch to use for training', choices = ['linear', 'pc_cnn', 'convnetd3'])
     parser.add_argument('--n_hiddens', type=int, default=100,
                         help='number of hidden neurons at each layer')
@@ -23,7 +23,7 @@ def get_parser():
 
     # optimizer parameters influencing all models
     parser.add_argument("--glances", default=1, type=int,
-                        help="Number of times the model is allowed to train over a set of samples in the single pass setting") 
+                        help="Number of times the model is allowed to train over a set of samples in the single pass setting")
     parser.add_argument('--n_epochs', type=int, default=1,
                         help='Number of epochs per task')
     parser.add_argument('--batch_size', type=int, default=1,
@@ -31,12 +31,12 @@ def get_parser():
                         'experiments). Variable name is from GEM project.')
     parser.add_argument('--replay_batch_size', type=float, default=20,
                         help='The batch size for experience replay.')
-    parser.add_argument('--memories', type=int, default=5120, 
+    parser.add_argument('--memories', type=int, default=5120,
                         help='number of total memories stored in a reservoir sampling based buffer')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='learning rate (For baselines)')
 
-    
+
     # experiment parameters
     parser.add_argument('--cuda', default=False , action='store_true',
                         help='Use GPU')
@@ -94,9 +94,9 @@ def get_parser():
     parser.add_argument('--grad_clip_norm', type=float, default=2.0,
                         help='Clip the gradients by this value')
     parser.add_argument("--cifar_batches", default=3, type=int,
-                        help="Number of batches in inner trajectory") 
-    parser.add_argument('--use_old_task_memory', default=False, action='store_true', 
-                        help='Use only old task samples for replay buffer data')    
+                        help="Number of batches in inner trajectory")
+    parser.add_argument('--use_old_task_memory', default=False, action='store_true',
+                        help='Use only old task samples for replay buffer data')
     parser.add_argument('--second_order', default=False , action='store_true',
                         help='use second order MAML updates')
 
@@ -112,6 +112,13 @@ def get_parser():
     parser.add_argument('--distill_pix_init', type=str, default='real', choices=['real', 'noise'], help='pixel initialization method')
     parser.add_argument('--dsa_strategy', type=str, default='color_crop_cutout_flip_scale_rotate', help='DSA augmentation strategy')
 
+    # Phase 2: Post-training with distilled data
+    parser.add_argument('--num_dd_epochs', type=int, default=100, help='number of epochs for Phase 2 distilled data training')
+    parser.add_argument('--dd_lr', type=float, default=0.01, help='learning rate for Phase 2 training')
+    parser.add_argument('--dd_batch_size', type=int, default=64, help='batch size for Phase 2 training')
+    parser.add_argument('--dd_weight_decay', type=float, default=1e-4, help='weight decay for Phase 2 training')
+
+
    # memory parameters for GEM | AGEM | ICARL
     parser.add_argument('--n_memories', type=int, default=0,
                         help='number of memories per task')
@@ -121,7 +128,7 @@ def get_parser():
                         help='training steps per batch')
 
 
-    # parameters specific to MER 
+    # parameters specific to MER
     parser.add_argument('--gamma', type=float, default=1.0,
                         help='gamma learning rate parameter')
     parser.add_argument('--beta', type=float, default=1.0,
